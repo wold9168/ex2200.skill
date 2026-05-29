@@ -26,7 +26,29 @@ This skill covers every aspect of maintaining and configuring Juniper EX2200 and
 **Key facts:**
 - Virtual Chassis: up to 4 switches (Junos 12.2+)
 - DC models do NOT support PoE
-- EX2200-C is fanless; all other models have fans
+- EX2200-C is fanless; all other models have active cooling
+
+## Cooling System
+
+### Fan Configuration
+| Model | Fans | Cooling Method |
+|---|---|---|
+| EX2200 non-PoE (non-C) | 2 fans (rear chassis) | Side-to-rear airflow |
+| EX2200 PoE (non-C) | 2 fans + 1 power supply fan | Side-to-rear airflow |
+| EX2200-C-12T | 0 (fanless) | Vents on top and sides |
+| EX2200-C-12P | 0 (fanless) | Vents + heatsink on rear panel |
+
+### Fan Behavior
+- Under normal conditions, fans operate at moderate speed to reduce noise
+- Temperature sensors in the chassis continuously monitor temperature
+- If any fan fails or temperature exceeds threshold: an alarm is raised and all functioning fans speed up
+- If temperature continues rising above the critical threshold: the switch shuts down automatically to protect hardware
+- EX2200-C (fanless): rely on passive cooling. **Do not block vents on top or sides** — overheating will cause shutdown
+
+### Airflow Direction
+- **Non-PoE models (non-C)**: intake from side → exhaust through rear (side-to-rear)
+- **PoE models (non-C)**: intake from side + power supply intake → exhaust through rear and rear power supply vent
+- **EX2200-C**: passive convection through top and side vents; PoE+ models use heatsink on rear panel for additional dissipation
 
 ## Hardware Terminology CLI Mapping
 
@@ -91,6 +113,20 @@ To view via CLI: `show chassis led`
 | PoE (POE) | On=device drawing power, Blinking=PoE available no device, Off=unavailable | Always unlit | Always unlit |
 
 PoE LED only present on: EX2200-C-12P, EX2200-24P, EX2200-48P.
+
+### Management Port LEDs (me0)
+
+The management Ethernet port has two dedicated LEDs:
+
+| LED | Color | State | Meaning |
+|---|---|---|---|
+| Link/Activity | Green | Blinking | Port and link active, with traffic |
+| Link/Activity | Green | Steady on | Port and link active, no traffic |
+| Link/Activity | Green | Off | Port not active |
+| Status | Green | 1 blink/s | Port speed = 10 Mbps |
+| Status | Green | 2 blinks/s | Port speed = 100 Mbps |
+
+Location: rear panel on EX2200 (non-C), front panel on EX2200-C.
 
 ## Rear Panel Components
 
@@ -256,6 +292,26 @@ Max PoE per port: 30 W (Junos 10.3+, IEEE 802.3at), 15.4 W (Junos ≤10.2, IEEE 
 - Supported USB drives: RE-USB-1G-S, RE-USB-2G-S, RE-USB-4G-S
 - USB 2.0+, formatted FAT or MS-DOS
 
+### Mini-USB Type-B Console Port Pinout (EX2200-C)
+| Pin | Signal |
+|---|---|
+| 1 | VCC (+5 VDC) |
+| 2 | D- (Data -) |
+| 3 | D+ (Data +) |
+| 4 | GND (Ground) |
+
+### RJ-45 Network Port Pinout (10/100/1000BASE-T)
+| Pin | Signal | PoE Polarity |
+|---|---|---|
+| 1 | TRP1+ | Negative Vport |
+| 2 | TRP1- | Negative Vport |
+| 3 | TRP2+ | Positive Vport |
+| 4 | TRP3+ | — |
+| 5 | TRP3- | — |
+| 6 | TRP2- | Positive Vport |
+| 7 | TRP4+ | — |
+| 8 | TRP4- | — |
+
 ## Environmental Requirements
 
 | Parameter | EX2200-C | EX2200 (non-C) |
@@ -266,6 +322,11 @@ Max PoE per port: 30 W (Junos 10.3+, IEEE 802.3at), 15.4 W (Junos ≤10.2, IEEE 
 | Seismic | Zone 4 (GR-63) | Zone 4 (GR-63) |
 
 Install in restricted-access areas (dedicated equipment rooms) per NEC Articles 110-16, 110-17, 110-18.
+
+### Extended Temperature SFP Transceivers (EX2200-C)
+When the EX2200-C operates with fiber uplinks outside its standard temperature range, extended temperature range SFP transceivers are required:
+- At 104–113°F (40–45°C) at altitudes up to 5,000 ft (1,524 m)
+- At 95–113°F (35–45°C) at altitudes above 5,000 ft up to 10,000 ft (3,048 m)
 
 ## Initial Configuration
 
@@ -1161,16 +1222,6 @@ Solution: Disable PoE on all RJ-45 ports used for inter-switch connections:
 set poe interface <interface-name> disable
 ```
 (This applies to EX2300/EX3400/EX4300 connected to EX2200 via RJ-45; the PoE voltage injection can interfere.)
-
-## Virtual Chassis
-
-- Supported starting Junos OS Release 12.2
-- Up to 4 EX2200 switches (including EX2200-C) can form a Virtual Chassis
-- Use SFP uplink ports as Virtual Chassis Ports (VCPs):
-  ```
-  set interfaces <interface-name> virtual-chassis vcp
-  ```
-- For full Virtual Chassis configuration: refer to *Virtual Chassis User Guide for EX2200, EX3300, EX4200, EX4500 and EX4550 Switches*
 
 ## RMA and Returns
 
