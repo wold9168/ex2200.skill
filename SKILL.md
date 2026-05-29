@@ -323,10 +323,24 @@ Max PoE per port: 30 W (Junos 10.3+, IEEE 802.3at), 15.4 W (Junos ≤10.2, IEEE 
 
 Install in restricted-access areas (dedicated equipment rooms) per NEC Articles 110-16, 110-17, 110-18.
 
+### Site Electrical Wiring Guidelines
+- Use twisted-pair cables with proper grounding distribution
+- Install surge suppression devices for AC power lines to protect against lightning-induced transients
+- Ensure building wiring provides a properly grounded and shielded environment free of electrical interference
+- Route cables away from high-voltage lines, fluorescent lighting fixtures, and electrical equipment that generates magnetic fields
+- Maintain separation between power cables and data cables
+
 ### Extended Temperature SFP Transceivers (EX2200-C)
 When the EX2200-C operates with fiber uplinks outside its standard temperature range, extended temperature range SFP transceivers are required:
 - At 104–113°F (40–45°C) at altitudes up to 5,000 ft (1,524 m)
 - At 95–113°F (35–45°C) at altitudes above 5,000 ft up to 10,000 ft (3,048 m)
+
+## Register Products (Mandatory for SLA Validation)
+
+Register serial numbers at https://tools.juniper.net/svcreg/SRegSerialNum.jsp
+and update installation base at https://www.juniper.net/customers/csc/management/updateinstallbase.jsp
+whenever hardware is added, moved, or changed. Without registration, hardware replacement
+service-level agreements (SLAs) will not be honored.
 
 ## Initial Configuration
 
@@ -760,6 +774,7 @@ set system services telnet                            # enable Telnet (not recom
 set system services web-management https system-generated-certificate
 set system services web-management http                # HTTP (not recommended)
 ```
+**Note:** EX2200-24T-4G-DC switches do NOT support J-Web. Use CLI for all configuration of DC models.
 
 #### SNMP
 ```
