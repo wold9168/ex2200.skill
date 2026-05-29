@@ -316,7 +316,704 @@ Out of the box, the EX2200 ships with:
 ```
 
 ### Factory Reset
-Press and hold the Factory reset/Mode button on the front panel during boot to reset to factory defaults.
+- **Method 1 (hardware)**: Press and hold the Factory reset/Mode button on the front panel during boot to reset to factory defaults
+- **Method 2 (CLI)**: Enter configuration mode and run:
+  ```
+  root# load factory-default
+  root# set system root-authentication plain-text-password
+  root# commit
+  ```
+
+## Junos OS Configuration
+
+This section covers how to configure the EX2200 switch from a software perspective using the Junos OS CLI. All examples assume you are in configuration mode (`configure`).
+
+### Junos CLI Quick Start
+
+The Junos CLI operates in two main modes:
+- **Operational mode** (prompt: `>`): show commands, ping, traceroute, request operations
+- **Configuration mode** (prompt: `#`): view and modify the active configuration
+
+Enter configuration mode: `configure` (or `edit`).
+Navigate to a hierarchy level: `edit <hierarchy-path>`.
+Exit a level: `exit`.
+Exit configuration mode: `exit configuration-mode`.
+Show the effective config: `show`.
+Commit changes: `commit`.
+Confirm before auto-rollback: `commit confirmed <minutes>`.
+Rollback uncommitted changes: `rollback`.
+Rollback to a previous committed version: `rollback <n>` (0 = current, 1 = previous).
+
+```
+user@switch> configure
+user@switch# show interfaces ge-0/0/0
+user@switch# set interfaces ge-0/0/0 description "Link to Server-01"
+user@switch# commit
+```
+
+### Default Configuration
+
+Out of the box, the EX2200 ships with a factory configuration that includes:
+- All network interfaces configured with `family ethernet-switching`
+- Storm control enabled on all interfaces
+- PoE enabled on all interfaces (PoE models only)
+- IGMP snooping enabled for `vlan all`
+- RSTP enabled globally
+- LLDP and LLDP-MED enabled on all interfaces
+- Default user `root` with no password
+
+The factory configuration structure is as follows:
+```
+system {
+    syslog {
+        user * { any emergency; }
+        file messages { any notice; authorization info; }
+        file interactive-commands { interactive-commands any; }
+    }
+    commit {
+        factory-settings {
+            reset-chassis-lcd-menu;
+            reset-virtual-chassis-configuration;
+        }
+    }
+}
+interfaces {
+    ge-0/0/0 { unit 0 { family ethernet-switching; } }
+    ... (all ports, including uplinks ge-0/1/0 through ge-0/1/3)
+}
+protocols {
+    igmp-snooping { vlan all; }
+    rstp;
+    lldp { interface all; }
+    lldp-med { interface all; }
+}
+ethernet-switching-options {
+    storm-control { interface all; }
+}
+```
+
+### VLAN Configuration
+
+#### Create a VLAN
+```
+set vlans <vlan-name> vlan-id <vlan-id>
+```
+
+**Example — create VLANs for data and voice:**
+```
+set vlans DATA vlan-id 100
+set vlans VOICE vlan-id 200
+```
+
+#### Assign a Port as Access Port to a VLAN
+```
+set interfaces <interface> unit 0 family ethernet-switching vlan members <vlan-name>
+```
+
+**Example — assign ge-0/0/1 to DATA VLAN:**
+```
+set interfaces ge-0/0/1 unit 0 family ethernet-switching vlan members DATA
+```
+
+#### Configure a Trunk Port
+```
+set interfaces <interface> unit 0 family ethernet-switching port-mode trunk
+set interfaces <interface> unit 0 family ethernet-switching vlan members [ <vlan-list> ]
+```
+
+**Example — trunk port carrying DATA and VOICE VLANs:**
+```
+set interfaces ge-0/0/24 unit 0 family ethernet-switching port-mode trunk
+set interfaces ge-0/0/24 unit 0 family ethernet-switching vlan members [ DATA VOICE ]
+```
+
+**Example — trunk with native VLAN:**
+```
+set interfaces ge-0/0/24 unit 0 family ethernet-switching port-mode trunk
+set interfaces ge-0/0/24 unit 0 family ethernet-switching vlan members all
+set interfaces ge-0/0/24 unit 0 family ethernet-switching native-vlan-id <vlan-id>
+```
+
+#### Configure Voice VLAN
+```                                      ↵
+set interfaces <interface> unit 0 family ethernet-switching port-mode access
+set vlans VOICE vlan-id <vlan-id>
+set vlans VOICE l3-interface irb.<vlan-id>
+set interfaces <interface> unit 0 family ethernet-switching vlan members DATA
+set ethernet-switching-options voip interface <interface> vlan VOICE
+```
+
+**Full example — ge-0/0/5 as access port with DATA VLAN 100 and VOICE VLAN 200:**
+```
+set vlans DATA vlan-id 100
+set vlans VOICE vlan-id 200
+set interfaces ge-0/0/5 unit 0 family ethernet-switching port-mode access
+set interfaces ge-0/0/5 unit 0 family ethernet-switching vlan members DATA
+set ethernet-switching-options voip interface ge-0/0/5 vlan VOICE
+```
+
+#### Configure VLAN Routing (IRB / SVI)
+
+To route between VLANs, create an IRB (Integrated Routing and Bridging) interface:
+```
+set interfaces irb unit <vlan-id> family inet address <ip>/<prefix>
+set vlans <vlan-name> l3-interface irb.<vlan-id>
+```
+
+**Example — routed VLANs with IP addresses:**
+```
+set interfaces irb unit 100 family inet address 10.0.100.254/24
+set interfaces irb unit 200 family inet address 10.0.200.254/24
+set vlans DATA vlan-id 100
+set vlans DATA l3-interface irb.100
+set vlans VOICE vlan-id 200
+set vlans VOICE l3-interface irb.200
+```
+
+**Example — uplink as Layer 3 routed port (no IRB needed):**
+```
+set interfaces ge-0/1/0 unit 0 family inet address 192.168.1.1/30
+set interfaces ge-0/1/0 unit 0 family inet no-redirects
+```
+
+#### Configure Default Gateway
+```
+set routing-options static route 0/0 next-hop <gateway-ip>
+```
+
+**Example — default route via gateway 192.168.1.2:**
+```
+set routing-options static route 0/0 next-hop 192.168.1.2
+```
+
+#### View VLAN Configuration
+```
+show vlans                       # all VLANs and their member ports
+show vlans <vlan-name> detail    # detailed info for a specific VLAN
+show ethernet-switching table    # MAC address table per VLAN
+show interfaces <interface>      # full interface status
+show configuration vlans         # VLAN configuration in CLI syntax
+```
+
+### Interface Configuration
+
+#### Set Interface Description
+```
+set interfaces <interface> description "<string>"
+```
+
+**Example:**
+```
+set interfaces ge-0/0/1 description "Server-01 eth0"
+```
+
+#### Set Interface Speed and Duplex
+```
+set interfaces <interface> speed <10m|100m|1g|auto>
+set interfaces <interface> link-mode <full-duplex|half-duplex|auto>
+```
+
+**Example:**
+```
+set interfaces ge-0/0/1 speed 1g
+set interfaces ge-0/0/1 link-mode full-duplex
+```
+
+#### Disable / Enable a Port
+```
+set interfaces <interface> disable              # administratively down
+delete interfaces <interface> disable           # bring it back up
+```
+
+#### Configure Media Type on Dual-Purpose Uplink (EX2200-C)
+```
+set interfaces <interface> media-type <copper|fiber>
+```
+
+**Example — force SFP uplink port on EX2200-C to use fiber:**
+```
+set interfaces ge-0/1/0 media-type fiber
+```
+
+#### Configure Interface Ranges (Bulk Operations)
+```
+set interfaces interface-range <range-name> member-range <interface-start> to <interface-end>
+set interfaces interface-range <range-name> unit 0 family ethernet-switching port-mode access
+set interfaces interface-range <range-name> unit 0 family ethernet-switching vlan members DATA
+```
+
+**Example — assign ports 1–12 to DATA VLAN:**
+```
+set interfaces interface-range DATA-PORTS member-range ge-0/0/0 to ge-0/0/11
+set interfaces interface-range DATA-PORTS unit 0 family ethernet-switching port-mode access
+set interfaces interface-range DATA-PORTS unit 0 family ethernet-switching vlan members DATA
+```
+
+### Link Aggregation (LAG / LACP)
+
+#### Configure a Static LAG (without LACP)
+```
+set interfaces ae0 aggregated-ether-options link-speed <speed>
+set interfaces ae0 unit 0 family ethernet-switching port-mode trunk
+set interfaces ae0 unit 0 family ethernet-switching vlan members [ DATA VOICE ]
+set interfaces ge-0/0/23 ether-options 802.3ad ae0
+set interfaces ge-0/0/24 ether-options 802.3ad ae0
+```
+
+#### Configure a Dynamic LAG (with LACP)
+```
+set interfaces ae0 aggregated-ether-options link-speed 1g
+set interfaces ae0 aggregated-ether-options lacp active
+set interfaces ae0 unit 0 family ethernet-switching port-mode trunk
+set interfaces ae0 unit 0 family ethernet-switching vlan members [ DATA VOICE ]
+set interfaces ge-0/0/1 ether-options 802.3ad ae0
+set interfaces ge-0/0/2 ether-options 802.3ad ae0
+```
+
+**Monitor LAG status:**
+```
+show lacp interfaces
+show interfaces ae0 extensive
+show ethernet-switching table interface ae0
+```
+
+### Spanning Tree Protocol
+
+EX2200 supports RSTP (default) and MSTP. RSTP is enabled by default in the factory configuration.
+
+#### Configure RSTP (default, typically no changes needed)
+```
+set protocols rstp interface all
+```
+
+**Optional — tune RSTP parameters:**
+```
+set protocols rstp bridge-priority <0-61440>    # step 4096, lower = more likely root
+set protocols rstp max-age <6-40>               # default 20
+set protocols rstp hello-time <1-10>            # default 2
+set protocols rstp forward-delay <4-30>         # default 15
+```
+
+#### Configure MSTP (if multiple spanning tree instances are needed)
+```
+set protocols mstp configuration-name <name>
+set protocols mstp revision-level <revision>
+set protocols mstp mst-instance <instance-id> vlan-id <vlan-id>
+```
+
+**Example — MSTP with two instances:**
+```
+delete protocols rstp                         # remove RSTP first
+set protocols mstp configuration-name EX2200-CORE
+set protocols mstp revision-level 1
+set protocols mstp interface all
+set protocols mstp mst-instance 1 vlan-id 100-200
+set protocols mstp mst-instance 2 vlan-id 300-400
+```
+
+#### Configure BPDU Guard on Edge Ports
+```
+set protocols rstp interface <interface> bpdu-block-on-edge
+```
+
+**Example — enable BPDU guard on all edge ports:**
+```
+set protocols rstp interface ge-0/0/0 bpdu-block-on-edge
+set protocols rstp interface ge-0/0/1 bpdu-block-on-edge
+```
+
+### LLDP and LLDP-MED Configuration
+
+LLDP and LLDP-MED are enabled by default on all interfaces.
+
+#### Configure LLDP
+```
+set protocols lldp interface all
+```
+
+#### Configure LLDP-MED (for VoIP support)
+```
+set protocols lldp-med interface all
+```
+
+#### Customize LLDP
+```
+set protocols lldp advertisement-interval <seconds>    # default 30
+set protocols lldp transmit-delay <seconds>             # default 2
+set protocols lldp hold-multiplier <multiplier>         # default 4
+```
+
+### PoE Configuration
+
+PoE is enabled by default on all ports of PoE-capable models.
+
+#### Enable/Disable PoE on a Port
+```
+set poe interface <interface> disable              # disable PoE on a port
+delete poe interface <interface> disable           # re-enable PoE
+```
+
+**Example — disable PoE on inter-switch port:**
+```
+set poe interface ge-0/0/24 disable
+```
+
+#### Configure PoE Priority
+```
+set poe interface <interface> priority <low|high|critical>
+```
+
+**Example — set high priority for a VoIP port:**
+```
+set poe interface ge-0/0/5 priority high
+```
+
+#### Configure Maximum Power Per Port
+```
+set poe interface <interface> maximum-power <watts>
+```
+
+**Example — limit to 15.4W per port:**
+```
+set poe interface ge-0/0/5 maximum-power 15400       # in milliwatts
+```
+
+#### View PoE Status
+```
+show poe                   # global PoE status
+show poe interface         # per-interface PoE details
+show poe telemetries       # real-time PoE power consumption
+```
+
+### Management and Security Configuration
+
+#### Remote Access (SSH, Telnet)
+```
+set system services ssh root-login allow             # allow root SSH access
+set system services ssh protocol-version v2           # use SSHv2 only
+set system services telnet                            # enable Telnet (not recommended)
+```
+
+#### J-Web (Web Management)
+```
+set system services web-management https system-generated-certificate
+set system services web-management http                # HTTP (not recommended)
+```
+
+#### SNMP
+```
+set snmp community <community> authorization read-only
+set snmp community <community> clients <ip-prefix>
+set snmp location "<string>"
+set snmp contact "<string>"
+```
+
+**Example:**
+```
+set snmp community public authorization read-only
+set snmp community public clients 10.0.0.0/8
+set snmp location "Data Center A - Rack 12"
+set snmp contact "noc@company.com"
+```
+
+#### Syslog
+```
+set system syslog file messages any notice
+set system syslog file messages authorization info
+set system syslog file interactive-commands interactive-commands any
+set system syslog host <syslog-server> any any
+```
+
+**Example — send logs to a remote syslog server:**
+```
+set system syslog host 10.0.100.10 any any
+set system syslog host 10.0.100.10 port 514
+```
+
+#### NTP
+```
+set system ntp server <ntp-server> prefer
+set system time-zone <timezone>
+```
+
+**Example:**
+```
+set system ntp server 0.pool.ntp.org
+set system ntp server 1.pool.ntp.org prefer
+set system time-zone America/New_York
+```
+
+#### Authentication and Access
+```
+set system login user <username> class <class>
+set system login user <username> authentication plain-text-password
+```
+
+**Available classes:** `super-user`, `operator`, `read-only`, `unauthorized`.
+
+**Example — create an admin account:**
+```
+set system login user admin class super-user
+set system login user admin authentication plain-text-password
+```
+
+#### Radius / TACACS+ (Network Access Control)
+```
+set system radius-server <server-ip> secret <secret>
+set system authentication-order [ radius password ]
+```
+
+**Example — RADIUS authentication for management:**
+```
+set system radius-server 10.0.100.10 secret SharedSecret123
+set system authentication-order radius
+set system authentication-order password
+```
+
+#### DHCP Snooping
+```
+set ethernet-switching-options secure-access-port vlan <vlan-name> dhcp-snooping
+set ethernet-switching-options secure-access-port interface <interface> dhcp-trusted
+```
+
+**Example — trust the uplink and enable DHCP snooping on a VLAN:**
+```
+set ethernet-switching-options secure-access-port vlan DATA dhcp-snooping
+set ethernet-switching-options secure-access-port interface ge-0/0/24 dhcp-trusted
+set ethernet-switching-options secure-access-port interface ge-0/1/0 dhcp-trusted
+```
+
+### Port Security and Storm Control
+
+#### MAC Limiting
+```
+set ethernet-switching-options secure-access-port vlan <vlan-name> mac-limit <count>
+set ethernet-switching-options secure-access-port interface <interface> mac-limit <count>
+set ethernet-switching-options secure-access-port interface <interface> allowed-mac [ <mac-list> ]
+```
+
+**Example — limit to 5 MACs per access port:**
+```
+set ethernet-switching-options secure-access-port interface ge-0/0/1 mac-limit 5
+```
+
+#### MAC Move Limiting
+```
+set ethernet-switching-options secure-access-port interface <interface> mac-move-limit <count>
+```
+
+**Example — limit MAC moves per port:**
+```
+set ethernet-switching-options secure-access-port interface ge-0/0/1 mac-move-limit 3
+```
+
+#### Storm Control
+Storm control is enabled on all interfaces by default in the factory configuration.
+```
+set ethernet-switching-options storm-control interface all
+set ethernet-switching-options storm-control interface <interface> bandwidth-level <percentage>
+```
+
+**Example — custom storm control on trunk:**
+```
+set ethernet-switching-options storm-control interface ge-0/0/24 bandwidth-level 80
+```
+
+### Virtual Chassis Configuration
+
+EX2200 supports Virtual Chassis starting from Junos OS Release 12.2, with up to 4 member switches.
+
+#### Configure a Uplink Port as a Virtual Chassis Port (VCP) on Each Member
+On member 1:
+```
+set interfaces ge-0/1/3 virtual-chassis vcp
+```
+On member 2:
+```
+set interfaces ge-0/1/3 virtual-chassis vcp
+```
+Connect the VCP ports with an SFP cable (copper or fiber).
+
+#### Set Virtual Chassis Member ID (Preprovisioned Model)
+```
+set virtual-chassis preprovisioned
+set virtual-chassis member <id> role <routing-engine | line-card> serial-number <serial>
+```
+
+**Example — two-member Virtual Chassis:**
+```
+delete virtual-chassis no-split-detect
+set virtual-chassis preprovisioned
+set virtual-chassis member 0 role routing-engine serial-number CV0209096579
+set virtual-chassis member 1 role routing-engine serial-number CV0210098321
+```
+
+**Example — non-provisioned (automatic member ID assignment):**
+```
+set virtual-chassis no-split-detect
+```
+
+#### Master Election Priority
+```
+set virtual-chassis member <id> mastership-priority <value>    # 1-255, higher = more likely master
+```
+
+**Example — prefer member 0 as master:**
+```
+set virtual-chassis member 0 mastership-priority 200
+set virtual-chassis member 1 mastership-priority 100
+```
+
+#### Split Detection (for Virtual Chassis health)
+```
+set virtual-chassis no-split-detect                    # disable split detection (if needed)
+set virtual-chassis graceful-switchover                # enable nonstop routing during switchover
+```
+
+#### Virtual Chassis Monitoring Commands
+```
+show virtual-chassis                                   # display VC member status and roles
+show virtual-chassis vc-port                           # display VCP status
+show virtual-chassis status                            # member roles, serials, mastership
+request virtual-chassis renumber <old-id> <new-id>     # renumber a member
+request virtual-chassis vc-port set <interface>        # set a port as VCP (operational mode)
+```
+
+### Configuration Management
+
+#### Save the Active Configuration
+```
+user@switch> save configuration <filename>               # save to /var/tmp/
+user@switch> show configuration | save <filename>
+```
+
+**Example:**
+```
+user@switch> save configuration /var/tmp/backup.conf
+```
+
+#### Backup Configuration to a Remote Server
+```
+user@switch> file copy /var/tmp/backup.conf ftp://server/path/
+user@switch> file copy /var/tmp/backup.conf scp://user@server/path/
+```
+
+#### Load a Configuration from File
+```
+user@switch# load override /var/tmp/backup.conf          # replace entire config
+user@switch# load merge /var/tmp/snippet.conf            # merge from top-level hierarchy
+user@switch# load merge relative /var/tmp/snippet.conf   # merge from current hierarchy level
+user@switch# load patch /var/tmp/patch.conf               # apply a diff patch
+```
+
+**Example — loading a snippet at a specific hierarchy level:**
+```
+user@switch# edit system scripts
+user@switch# load merge relative /var/tmp/script-snippet.conf
+```
+
+#### Rollback Configuration
+```
+user@switch> rollback <n>                                # rollback to revision n (operational mode)
+user@switch# rollback <n>                                # rollback (configuration mode)
+```
+
+List available rollback points:
+```
+user@switch> show system rollback
+```
+
+**Example — rollback to revision 2 (the third most recent commit):**
+```
+user@switch> rollback 2
+```
+
+#### Rescue Configuration
+The rescue configuration is a known-good configuration saved separately.
+```
+user@switch> request system configuration rescue save       # save current config as rescue
+user@switch> request system configuration rescue delete     # delete the rescue config
+user@switch# load rescue                                    # load the rescue config
+```
+
+#### Revert to Factory Defaults
+```
+user@switch# load factory-default
+user@switch# set system root-authentication plain-text-password
+user@switch# commit
+```
+
+Or via the hardware button: press and hold Factory reset/Mode button during boot.
+
+#### Graceful System Shutdown
+```
+user@switch> request system halt
+```
+Wait for the confirmation message before disconnecting power.
+
+### Software Management
+
+#### Check Current Software Version
+```
+user@switch> show version
+```
+
+#### Upgrade Junos OS
+```
+user@switch> request system software add <package-url> validate
+user@switch> request system software add <package-url> no-validate  # skip validation
+user@switch> request system reboot
+```
+
+**Example — upgrade from a file:**
+```
+user@switch> request system software add /var/tmp/jinstall-ex-2200-<version>.tgz validate
+user@switch> request system reboot
+```
+
+#### Reboot the Switch
+```
+user@switch> request system reboot
+user@switch> request system reboot at <time>               # scheduled reboot
+user@switch> request system reboot in <minutes>            # reboot after delay
+```
+
+### Monitoring and Diagnostics — Complete Show Command Reference
+
+| Command | What It Shows |
+|---|---|
+| `show chassis hardware` | Hardware inventory, serial numbers, model info |
+| `show chassis environment` | Temperatures, fan RPM, power supply status |
+| `show chassis temperature-thresholds` | Warning and shutdown temperature thresholds |
+| `show chassis alarms` | Active chassis alarms |
+| `show chassis led` | LED status (same as physical front-panel LEDs) |
+| `show system alarms` | System alarms (missing rescue config, licenses) |
+| `show log messages` | System log messages |
+| `show interfaces terse` | All interface status at a glance (up/down, IPs) |
+| `show interfaces <name>` | Detailed status for a specific interface |
+| `show interfaces diagnostics optics <name>` | Optical transceiver diagnostics (if SFP) |
+| `show vlans` | All VLANs and their member ports |
+| `show vlans <name>` | Detailed VLAN info |
+| `show ethernet-switching table` | MAC address table |
+| `show ethernet-switching table vlan <name>` | MAC table for a specific VLAN |
+| `show ethernet-switching table interface <name>` | MAC table for a specific interface |
+| `show poe` | Global PoE power information |
+| `show poe interface` | Per-port PoE status and power draw |
+| `show lldp neighbors` | LLDP-discovered neighbors |
+| `show lldp neighbors detail` | Detailed LLDP neighbor info |
+| `show spanning-tree bridge` | RSTP/MSTP bridge status |
+| `show spanning-tree interface` | RSTP/MSTP per-interface state |
+| `show configuration` | Current active configuration |
+| `show configuration \| display set` | Configuration in set-command format |
+| `show system rollback` | List of saved rollback configurations |
+| `show system uptime` | Switch uptime and boot time |
+| `show system processes` | Running processes |
+| `show system storage` | Disk usage on flash partitions |
+| `show version` | Junos OS version and model |
+| `show version detail` | Detailed version info, build date |
+
+#### Running Diagnostics Remotely (with user consent)
+If the user provides remote connectivity details (IP, credentials), use SSH to execute commands directly.
 
 ## Transceiver Maintenance
 
